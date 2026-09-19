@@ -20,7 +20,11 @@ func (app *application) routes() http.Handler {
 	authGroup.Use(app.AuthMiddleware())
 	{
 		authGroup.POST("/urls", app.generateURL)
+		authGroup.GET("/urls", app.listURLs)
 	}
+
+	g.GET("/health", app.health)
+	g.GET("/:code", app.redirectURL)
 
 	return g
 }

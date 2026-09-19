@@ -50,3 +50,98 @@ func (m *URLModel) Insert(u *URL) error {
 
 	return nil
 }
+
+func (m *URLModel) GetByShortCode(shortCode string) (*URL, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+		SELECT id, user_id, short_code, original_url, click_count, created_at, expires_at, is_active
+		FROM urls
+		WHERE short_code = $1`
+
+	var u URL
+	err := m.DB.QueryRowContext(ctx, query, shortCode).Scan(
+		&u.ID,
+		&u.UserID,
+		&u.ShortCode,
+		&u.OriginalURL,
+		&u.ClickCount,
+		&u.CreatedAt,
+		&u.ExpiresAt,
+		&u.IsActive,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	return &u, nil
+}
+
+func (m *URLModel) IncrementClickCount(id uuid.UUID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `
+		UPDATE urls
+		SET click_count = click_count + 1
+		WHERE id = $1`
+
+	_, err := m.DB.ExecContext(ctx, query, id)
+	return err
+}
+
+func (m *URLModel) GetByUserID(userID uuid.UUID, limit, offset int) ([]URL, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	var totalRecords int
+	countQuery := `SELECT COUNT(*) FROM urls WHERE user_id = $1`
+	err := m.DB.QueryRowContext(ctx, countQuery, userID).Scan(&totalRecords)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := `
+		SELECT id, user_id, short_code, original_url, click_count, created_at, expires_at, is_active
+		FROM urls
+		WHERE user_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2 OFFSET $3`
+
+	rows, err := m.DB.QueryContext(ctx, query, userID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	urls := make([]URL, 0)
+	for rows.Next() {
+		var u URL
+		err := rows.Scan(
+			&u.ID,
+			&u.UserID,
+			&u.ShortCode,
+			&u.OriginalURL,
+			&u.ClickCount,
+			&u.CreatedAt,
+			&u.ExpiresAt,
+			&u.IsActive,
+		)
+		if err != nil {
+			return nil, 0, err
+		}
+		urls = append(urls, u)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, 0, err
+	}
+
+	return urls, totalRecords, nil
+}
+
+
