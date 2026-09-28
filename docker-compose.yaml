@@ -4,7 +4,7 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: shortener_db_postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_password
@@ -14,11 +14,28 @@ services:
     volumes:
       - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d shortener_url"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shortener_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      DATABASE_URL: postgresql://test_user:test_password@postgres:5432/shortener_url?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-for-development-12345}
+      BASE_URL: ${BASE_URL:-http://localhost:8080}
+    ports:
+      - "8080:8080"
 
 volumes:
   pgdata:
-
-
-# postgresql://test_user:test_password@localhost:5433/shortener_db
-# 
-# go run ./cmd/migrate up
