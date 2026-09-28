@@ -144,4 +144,26 @@ func (m *URLModel) GetByUserID(userID uuid.UUID, limit, offset int) ([]URL, int,
 	return urls, totalRecords, nil
 }
 
+func (m *URLModel) Delete(id uuid.UUID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	query := `DELETE FROM urls WHERE id = $1`
+	result, err := m.DB.ExecContext(ctx, query, id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+
 

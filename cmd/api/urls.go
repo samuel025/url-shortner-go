@@ -358,3 +358,219 @@ func (app *application) listURLs(c *gin.Context) {
 		},
 	})
 }
+
+type URLMetadataResponse struct {
+	ShortCode   string     `json:"short_code"`
+	ShortURL    string     `json:"short_url"`
+	OriginalURL string     `json:"original_url"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	IsActive    bool       `json:"is_active"`
+}
+
+func (app *application) getURLMetadata(c *gin.Context) {
+	code := c.Param("code")
+	if !isValidShortCode(code) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "INVALID_CODE",
+				"message": "The short code format is invalid.",
+			},
+		})
+		return
+	}
+
+	urlRecord, err := app.models.URLs.GetByShortCode(code)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "NOT_FOUND",
+					"message": "Short URL not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to look up URL",
+			},
+		})
+		return
+	}
+
+	if !urlRecord.IsActive || (urlRecord.ExpiresAt != nil && time.Now().After(*urlRecord.ExpiresAt)) {
+		c.JSON(http.StatusGone, gin.H{
+			"error": gin.H{
+				"code":    "EXPIRED_URL",
+				"message": "This short link has expired or has been deactivated",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, URLMetadataResponse{
+		ShortCode:   urlRecord.ShortCode,
+		ShortURL:    app.buildShortURL(c, urlRecord.ShortCode),
+		OriginalURL: urlRecord.OriginalURL,
+		CreatedAt:   urlRecord.CreatedAt,
+		ExpiresAt:   urlRecord.ExpiresAt,
+		IsActive:    urlRecord.IsActive,
+	})
+}
+
+func (app *application) getURLStats(c *gin.Context) {
+	userVal, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": gin.H{
+				"code":    "UNAUTHORIZED",
+				"message": "Authentication required",
+			},
+		})
+		return
+	}
+
+	user, ok := userVal.(*database.User)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to resolve authenticated user",
+			},
+		})
+		return
+	}
+
+	code := c.Param("code")
+	if !isValidShortCode(code) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "INVALID_CODE",
+				"message": "The short code format is invalid.",
+			},
+		})
+		return
+	}
+
+	urlRecord, err := app.models.URLs.GetByShortCode(code)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "NOT_FOUND",
+					"message": "Short URL not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to look up URL",
+			},
+		})
+		return
+	}
+
+	if urlRecord.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "FORBIDDEN",
+				"message": "You do not have permission to view statistics for this URL",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, URLResponse{
+		ID:          urlRecord.ID,
+		ShortCode:   urlRecord.ShortCode,
+		ShortURL:    app.buildShortURL(c, urlRecord.ShortCode),
+		OriginalURL: urlRecord.OriginalURL,
+		ClickCount:  urlRecord.ClickCount,
+		CreatedAt:   urlRecord.CreatedAt,
+		ExpiresAt:   urlRecord.ExpiresAt,
+		IsActive:    urlRecord.IsActive,
+	})
+}
+
+func (app *application) deleteURL(c *gin.Context) {
+	userVal, exists := c.Get("user")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error": gin.H{
+				"code":    "UNAUTHORIZED",
+				"message": "Authentication required",
+			},
+		})
+		return
+	}
+
+	user, ok := userVal.(*database.User)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to resolve authenticated user",
+			},
+		})
+		return
+	}
+
+	code := c.Param("code")
+	if !isValidShortCode(code) {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"code":    "INVALID_CODE",
+				"message": "The short code format is invalid.",
+			},
+		})
+		return
+	}
+
+	urlRecord, err := app.models.URLs.GetByShortCode(code)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": gin.H{
+					"code":    "NOT_FOUND",
+					"message": "Short URL not found",
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to look up URL",
+			},
+		})
+		return
+	}
+
+	if urlRecord.UserID != user.ID {
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": gin.H{
+				"code":    "FORBIDDEN",
+				"message": "You do not have permission to delete this URL",
+			},
+		})
+		return
+	}
+
+	if err := app.models.URLs.Delete(urlRecord.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": gin.H{
+				"code":    "INTERNAL_SERVER_ERROR",
+				"message": "Failed to delete URL",
+			},
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "URL deleted successfully",
+	})
+}
