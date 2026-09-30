@@ -1,15 +1,89 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/time/rate"
+	"github.com/samuel025/url-shortner-go/internal/database"
 )
+
+func (app *application) RequestIDMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		reqID := c.GetHeader("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()
+		}
+		c.Set("request_id", reqID)
+		c.Writer.Header().Set("X-Request-ID", reqID)
+		c.Next()
+	}
+}
+
+func (app *application) StructuredLoggerMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		path := c.Request.URL.Path
+		raw := c.Request.URL.RawQuery
+		if raw != "" {
+			path = path + "?" + raw
+		}
+
+		c.Next()
+
+		latency := time.Since(start)
+		status := c.Writer.Status()
+		reqID := c.GetString("request_id")
+		clientIP := c.ClientIP()
+		method := c.Request.Method
+		userAgent := c.Request.UserAgent()
+
+		var userID string
+		if u, exists := c.Get("user"); exists {
+			if user, ok := u.(*database.User); ok {
+				userID = user.ID.String()
+			}
+		}
+
+		attrs := []slog.Attr{
+			slog.String("request_id", reqID),
+			slog.String("method", method),
+			slog.String("path", path),
+			slog.Int("status", status),
+			slog.Duration("latency", latency),
+			slog.Float64("latency_ms", float64(latency.Microseconds())/1000.0),
+			slog.String("client_ip", clientIP),
+			slog.String("user_agent", userAgent),
+		}
+
+		if userID != "" {
+			attrs = append(attrs, slog.String("user_id", userID))
+		}
+
+		if len(c.Errors) > 0 {
+			attrs = append(attrs, slog.String("errors", c.Errors.String()))
+		}
+
+		level := slog.LevelInfo
+		if status >= 500 {
+			level = slog.LevelError
+		} else if status >= 400 {
+			level = slog.LevelWarn
+		}
+
+		if app.logger != nil {
+			app.logger.LogAttrs(c.Request.Context(), level, "HTTP request", attrs...)
+		} else {
+			slog.Default().LogAttrs(c.Request.Context(), level, "HTTP request", attrs...)
+		}
+	}
+}
 
 func (app *application) AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -121,6 +195,7 @@ func (app *application) RateLimitMiddleware(r rate.Limit, burst int) gin.Handler
 		clientLimiter := limiter.getLimiter(ip)
 
 		if !clientLimiter.Allow() {
+			rateLimitedTotal.Inc()
 			c.Header("Retry-After", "60")
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": gin.H{
@@ -132,6 +207,31 @@ func (app *application) RateLimitMiddleware(r rate.Limit, burst int) gin.Handler
 			return
 		}
 
+		c.Next()
+	}
+}
+
+func (app *application) CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, Origin")
+		c.Header("Access-Control-Max-Age", "86400")
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func (app *application) BodyLimitMiddleware(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		}
 		c.Next()
 	}
 }

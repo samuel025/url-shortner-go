@@ -4,7 +4,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -162,6 +162,7 @@ func (app *application) generateURL(c *gin.Context) {
 
 		if err := app.models.URLs.Insert(newURL); err != nil {
 			if errors.Is(err, database.ErrDuplicateShortCode) {
+				collisionsTotal.Inc()
 				continue
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -174,6 +175,7 @@ func (app *application) generateURL(c *gin.Context) {
 		}
 
 		createdURL = newURL
+		urlsCreatedTotal.Inc()
 		break
 	}
 
@@ -252,9 +254,14 @@ func (app *application) redirectURL(c *gin.Context) {
 	}
 
 	if err := app.models.URLs.IncrementClickCount(urlRecord.ID); err != nil {
-		log.Printf("Failed to increment click count for short code %s (id: %s): %v", code, urlRecord.ID, err)
+		if app.logger != nil {
+			app.logger.Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
+		} else {
+			slog.Default().Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
+		}
 	}
 
+	redirectsTotal.Inc()
 	c.Redirect(http.StatusFound, urlRecord.OriginalURL)
 }
 

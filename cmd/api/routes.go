@@ -5,14 +5,32 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/time/rate"
 )
 
 func (app *application) routes() http.Handler {
-	g := gin.Default()
+	g := gin.New()
 
-	authLimiter := app.RateLimitMiddleware(rate.Every(6*time.Second), 5)    // 10 req/min, burst 5
+	// Global Middleware Pipeline
+	g.Use(gin.Recovery())
+	g.Use(app.RequestIDMiddleware())
+	g.Use(app.StructuredLoggerMiddleware())
+	g.Use(app.MetricsMiddleware())
+	g.Use(app.CORSMiddleware())
+	g.Use(app.BodyLimitMiddleware(1 << 20)) // 1 MB limit
+
+	// Rate limiters
+	authLimiter := app.RateLimitMiddleware(rate.Every(6*time.Second), 5)        // 10 req/min, burst 5
 	urlCreateLimiter := app.RateLimitMiddleware(rate.Every(2*time.Second), 10) // 30 req/min, burst 10
+
+	// Prometheus Metrics Endpoint
+	g.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Probes & Health Checks
+	g.GET("/health", app.health)
+	g.GET("/healthz", app.healthz)
+	g.GET("/readyz", app.readyz)
 
 	v1 := g.Group("api/v1")
 	{
@@ -32,7 +50,6 @@ func (app *application) routes() http.Handler {
 		authGroup.DELETE("/urls/:code", app.deleteURL)
 	}
 
-	g.GET("/health", app.health)
 	g.GET("/:code", app.redirectURL)
 
 	return g
