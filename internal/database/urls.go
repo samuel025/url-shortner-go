@@ -82,15 +82,19 @@ func (m *URLModel) GetByShortCode(shortCode string) (*URL, error) {
 }
 
 func (m *URLModel) IncrementClickCount(id uuid.UUID) error {
+	return m.IncrementClickCountBy(id, 1)
+}
+
+func (m *URLModel) IncrementClickCountBy(id uuid.UUID, amount int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	query := `
 		UPDATE urls
-		SET click_count = click_count + 1
-		WHERE id = $1`
+		SET click_count = click_count + $1
+		WHERE id = $2`
 
-	_, err := m.DB.ExecContext(ctx, query, id)
+	_, err := m.DB.ExecContext(ctx, query, amount, id)
 	return err
 }
 

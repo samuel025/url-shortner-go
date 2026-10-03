@@ -334,9 +334,27 @@
           "expr": "sum(rate(url_shortener_redirects_total[1m]))",
           "legendFormat": "Redirects/s",
           "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum(rate(url_shortener_cache_hits_total[1m]))",
+          "legendFormat": "Cache Hits/s",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "expr": "sum(rate(url_shortener_cache_misses_total[1m]))",
+          "legendFormat": "Cache Misses/s",
+          "refId": "D"
         }
       ],
-      "title": "Business Events Rate",
+      "title": "Business Events & Cache Rate",
       "type": "timeseries"
     },
     {

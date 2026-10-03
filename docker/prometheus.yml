@@ -7,3 +7,8 @@ scrape_configs:
     metrics_path: '/metrics'
     static_configs:
       - targets: ['api:8080']
+
+  - job_name: 'drmq'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['drmq:9096']

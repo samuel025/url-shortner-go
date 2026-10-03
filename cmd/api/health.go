@@ -43,8 +43,31 @@ func (app *application) readyz(c *gin.Context) {
 		return
 	}
 
+	redisStatus := "disabled"
+	if app.cache != nil {
+		if err := app.cache.Ping(ctx); err != nil {
+			if app.logger != nil {
+				app.logger.Error("Readiness probe redis ping failed", "error", err)
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":   "unready",
+				"database": "up",
+				"redis":    "down",
+			})
+			return
+		}
+		redisStatus = "up"
+	}
+
+	drmqStatus := "disabled"
+	if app.queue != nil {
+		drmqStatus = "up"
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"status":   "ready",
 		"database": "up",
+		"redis":    redisStatus,
+		"drmq":     drmqStatus,
 	})
 }

@@ -176,6 +176,15 @@ func (app *application) generateURL(c *gin.Context) {
 
 		createdURL = newURL
 		urlsCreatedTotal.Inc()
+		if app.cache != nil {
+			ttl := 24 * time.Hour
+			if createdURL.ExpiresAt != nil {
+				ttl = time.Until(*createdURL.ExpiresAt)
+			}
+			if ttl > 0 {
+				_ = app.cache.SetURL(c.Request.Context(), createdURL, ttl)
+			}
+		}
 		break
 	}
 
@@ -223,24 +232,47 @@ func (app *application) redirectURL(c *gin.Context) {
 		return
 	}
 
-	urlRecord, err := app.models.URLs.GetByShortCode(code)
-	if err != nil {
-		if errors.Is(err, database.ErrNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{
+	var urlRecord *database.URL
+	if app.cache != nil {
+		cached, err := app.cache.GetURL(c.Request.Context(), code)
+		if err == nil && cached != nil {
+			urlRecord = cached
+			cacheHitsTotal.Inc()
+		} else {
+			cacheMissesTotal.Inc()
+		}
+	}
+
+	if urlRecord == nil {
+		dbRecord, err := app.models.URLs.GetByShortCode(code)
+		if err != nil {
+			if errors.Is(err, database.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error": gin.H{
+						"code":    "NOT_FOUND",
+						"message": "Short URL not found",
+					},
+				})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{
 				"error": gin.H{
-					"code":    "NOT_FOUND",
-					"message": "Short URL not found",
+					"code":    "INTERNAL_SERVER_ERROR",
+					"message": "Failed to look up URL",
 				},
 			})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": gin.H{
-				"code":    "INTERNAL_SERVER_ERROR",
-				"message": "Failed to look up URL",
-			},
-		})
-		return
+		urlRecord = dbRecord
+		if app.cache != nil {
+			ttl := 24 * time.Hour
+			if urlRecord.ExpiresAt != nil {
+				ttl = time.Until(*urlRecord.ExpiresAt)
+			}
+			if ttl > 0 {
+				_ = app.cache.SetURL(c.Request.Context(), urlRecord, ttl)
+			}
+		}
 	}
 
 	if !urlRecord.IsActive || (urlRecord.ExpiresAt != nil && time.Now().After(*urlRecord.ExpiresAt)) {
@@ -253,11 +285,21 @@ func (app *application) redirectURL(c *gin.Context) {
 		return
 	}
 
-	if err := app.models.URLs.IncrementClickCount(urlRecord.ID); err != nil {
-		if app.logger != nil {
-			app.logger.Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
-		} else {
-			slog.Default().Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
+	if app.queue != nil {
+		if err := app.queue.PublishClick(urlRecord.ID); err != nil {
+			if app.logger != nil {
+				app.logger.Error("Failed to publish click event", "short_code", code, "id", urlRecord.ID, "error", err)
+			} else {
+				slog.Default().Error("Failed to publish click event", "short_code", code, "id", urlRecord.ID, "error", err)
+			}
+		}
+	} else {
+		if err := app.models.URLs.IncrementClickCount(urlRecord.ID); err != nil {
+			if app.logger != nil {
+				app.logger.Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
+			} else {
+				slog.Default().Error("Failed to increment click count", "short_code", code, "id", urlRecord.ID, "error", err)
+			}
 		}
 	}
 
@@ -575,6 +617,10 @@ func (app *application) deleteURL(c *gin.Context) {
 			},
 		})
 		return
+	}
+
+	if app.cache != nil {
+		_ = app.cache.DeleteURL(c.Request.Context(), code)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

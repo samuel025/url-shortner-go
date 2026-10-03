@@ -18,6 +18,44 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    container_name: shortener_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  drmq:
+    image: 0xuell/drmq:latest
+    container_name: shortener_drmq
+    restart: unless-stopped
+    ports:
+      - "9092:9092"
+      - "9292:9292"
+      - "9392:9392"
+      - "9096:9096"
+    environment:
+      - NODE_ID=standalone
+      - PORT=9092
+    volumes:
+      - drmq_data:/data
+
+  drmq-dashboard:
+    image: 0xuell/drmq-dashboard:latest
+    container_name: shortener_drmq_dashboard
+    restart: unless-stopped
+    ports:
+      - "3001:80"
+    depends_on:
+      - drmq
+
   api:
     build:
       context: .
@@ -27,9 +65,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      drmq:
+        condition: service_started
     environment:
       PORT: 8080
       DATABASE_URL: postgresql://test_user:test_password@postgres:5432/shortener_url?sslmode=disable
+      REDIS_URL: redis://redis:6379
+      DRMQ_BOOTSTRAP_SERVERS: drmq:9092
+      DRMQ_CLICK_TOPIC: url-clicks
       JWT_SECRET: ${JWT_SECRET:-super-secret-jwt-key-for-development-12345}
       BASE_URL: ${BASE_URL:-http://localhost:8080}
     ports:
@@ -68,5 +113,7 @@ services:
 
 volumes:
   pgdata:
+  redis_data:
+  drmq_data:
   prometheus_data:
   grafana_data:

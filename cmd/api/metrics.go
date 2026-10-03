@@ -62,6 +62,20 @@ var (
 			Help: "Total number of requests throttled due to rate limits.",
 		},
 	)
+
+	cacheHitsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "url_shortener_cache_hits_total",
+			Help: "Total number of URL cache hits.",
+		},
+	)
+
+	cacheMissesTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "url_shortener_cache_misses_total",
+			Help: "Total number of URL cache misses.",
+		},
+	)
 )
 
 func (app *application) MetricsMiddleware() gin.HandlerFunc {
