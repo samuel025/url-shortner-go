@@ -356,15 +356,3 @@ Common status codes and error codes:
 
 ---
 
-## Advanced Extensions
-
-The following architectural components represent planned later milestones beyond Version 1:
-
-### Redis Caching (Milestone 8)
-- Cache active `short_code -> original_url` entries in Redis.
-- During redirection (`GET /:code`), query Redis first; on a cache miss, load from PostgreSQL and write to Redis.
-- Invalidate cache entries upon URL deletion or expiration.
-
-### DRMQ Asynchronous Analytics (Milestone 9)
-- Publish lightweight click events (`url_id`, `timestamp`, `user_agent`, `referer`) to DRMQ rather than updating the database synchronously during redirect.
-- A background worker consumes from DRMQ and batches writes to a `click_events` analytics table, ensuring redirect latency remains under 5 milliseconds.
